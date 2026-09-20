@@ -1,5 +1,5 @@
 'use strict';
-const VERSJON = 2;
+const VERSJON = 3;
 
 const { HOLES, INDEX, PIECES, COLS, ROWS } = Solver;
 const NS = 'http://www.w3.org/2000/svg';
@@ -33,23 +33,27 @@ function kule(color, x, y) {
   return h + '</g>';
 }
 
-// Brikke: staver mellom (±2,0)/(0,±2), fuger mellom diagonale naboer, så kulene.
-function brikkeSvg(cells, color, prikk) {
+// Brikke: staver bare der brikken faktisk har dem (bars), fuger mellom diagonale naboer, så kulene.
+function brikkeSvg(cells, color, prikk, bars) {
   const set = new Set(cells.map(c => c[0] + ',' + c[1]));
   let under = '', kuler = '';
   const barCol = mix(color, -0.12), barLite = mix(color, 0.18);
+  const len = 2 - 2 * A + 0.1;
+  for (const [p, q] of bars) {
+    const [i0, j0] = cells[p], [i1, j1] = cells[q];
+    const i = Math.min(i0, i1), j = Math.min(j0, j1);
+    if (j0 === j1) {
+      under += `<rect x="${i + A - 0.05}" y="${j - 0.16}" width="${len}" height="0.32" fill="${barCol}"/>` +
+               `<rect x="${i + A - 0.05}" y="${j - 0.16}" width="${len}" height="0.08" fill="${barLite}"/>`;
+    } else {
+      under += `<rect x="${i - 0.16}" y="${j + A - 0.05}" width="0.32" height="${len}" fill="${barCol}"/>` +
+               `<rect x="${i - 0.16}" y="${j + A - 0.05}" width="0.08" height="${len}" fill="${barLite}"/>`;
+    }
+  }
   for (const [i, j] of cells) {
-    if (set.has((i + 2) + ',' + j)) {
-      under += `<rect x="${i + A - 0.05}" y="${j - 0.16}" width="${2 - 2 * A + 0.1}" height="0.32" fill="${barCol}"/>` +
-               `<rect x="${i + A - 0.05}" y="${j - 0.16}" width="${2 - 2 * A + 0.1}" height="0.08" fill="${barLite}"/>`;
-    }
-    if (set.has(i + ',' + (j + 2))) {
-      under += `<rect x="${i - 0.16}" y="${j + A - 0.05}" width="0.32" height="${2 - 2 * A + 0.1}" fill="${barCol}"/>` +
-               `<rect x="${i - 0.16}" y="${j + A - 0.05}" width="0.08" height="${2 - 2 * A + 0.1}" fill="${barLite}"/>`;
-    }
-    for (const dj of [1]) for (const di of [1, -1]) {
-      if (set.has((i + di) + ',' + (j + dj))) {
-        under += `<line x1="${i}" y1="${j}" x2="${i + di}" y2="${j + dj}" stroke="${mix(color, -0.25)}" stroke-width="${(2 * C * A).toFixed(3)}"/>`;
+    for (const di of [1, -1]) {
+      if (set.has((i + di) + ',' + (j + 1))) {
+        under += `<line x1="${i}" y1="${j}" x2="${i + di}" y2="${j + 1}" stroke="${mix(color, -0.25)}" stroke-width="${(2 * C * A).toFixed(3)}"/>`;
       }
     }
   }
@@ -93,26 +97,27 @@ const puzzleCache = {};
 const nr = () => (lagret.nr && lagret.nr[nivå.id]) || 1;
 
 function nyBrikker() {
-  return PIECES.map(p => ({ id: p.id, color: p.color, cells: p.rel.map(c => c.slice()), placed: null, fixed: false }));
+  return PIECES.map(p => ({ id: p.id, color: p.color, cells: p.rel.map(c => c.slice()), bars: p.bars, placed: null, fixed: false }));
 }
 
+// Opptatt-kart over kulehull og rutehull (stavene bruker rutehullene, så to staver kan ikke krysse hverandre)
+function markér(occ, b) {
+  for (const n of Solver.footprint(b.cells, b.bars, b.placed.i, b.placed.j)) occ[n] = 1;
+}
 function occupancy(utenId) {
-  const occ = new Uint8Array(HOLES.length);
-  for (const b of brikker) {
-    if (!b.placed || b.id === utenId) continue;
-    for (const [di, dj] of b.cells) occ[INDEX[(b.placed.i + di) + ',' + (b.placed.j + dj)]] = 1;
+  const occ = new Uint8Array(Solver.TOTAL);
+  for (const br of brikker) {
+    if (br.placed && br.id !== utenId) markér(occ, br);
   }
   return occ;
 }
-// Hull-nummer for cellene om brikken ligger med ankeret i (ai, aj), eller null hvis noe ikke passer
-function passer(cells, ai, aj, occ) {
-  const out = [];
-  for (const [di, dj] of cells) {
-    const n = INDEX[(ai + di) + ',' + (aj + dj)];
-    if (n === undefined || occ[n]) return null;
-    out.push(n);
-  }
-  return out;
+// Det brikken vil oppta om ankeret ligger i (ai, aj), eller null hvis den ikke passer:
+// utenfor brettet, oppå en annen kule, eller en stav som krysser en annen stav
+function passer(cells, bars, ai, aj, occ) {
+  const fp = Solver.footprint(cells, bars, ai, aj);
+  if (!fp) return null;
+  for (const n of fp) if (occ[n]) return null;
+  return fp;
 }
 
 async function startOppgave(nyttNummer, gjenopprett) {
@@ -138,15 +143,15 @@ async function startOppgave(nyttNummer, gjenopprett) {
   if (gjenopprett && gjenopprett.length) {
     // legg tilbake det barnet hadde lagt, hvis det fortsatt er gyldig
     const prøv = JSON.parse(JSON.stringify(brikker));
-    const occ = new Uint8Array(HOLES.length);
-    prøv.forEach(b => { if (b.fixed) for (const [di, dj] of b.cells) occ[INDEX[(b.placed.i + di) + ',' + (b.placed.j + dj)]] = 1; });
+    const occ = new Uint8Array(Solver.TOTAL);
+    prøv.forEach(b => { if (b.fixed) markér(occ, b); });
     let ok = true;
     for (const s of gjenopprett) {
       const b = prøv[s.id];
       if (!b || b.fixed || !Array.isArray(s.cells) || s.cells.length !== PIECES[s.id].cells.length) { ok = false; break; }
       b.cells = s.cells;
       if (s.placed) {
-        const hull = passer(b.cells, s.placed.i, s.placed.j, occ);
+        const hull = passer(b.cells, b.bars, s.placed.i, s.placed.j, occ);
         if (!hull) { ok = false; break; }
         hull.forEach(n => { occ[n] = 1; });
         b.placed = s.placed;
@@ -190,7 +195,7 @@ function tegnBrett() {
   let h = '';
   for (const b of brikker) {
     if (!b.placed) continue;
-    h += `<g class="bp${b.fixed ? ' last' : ''}${valgt === b.id ? ' valgt' : ''}" data-p="${b.id}" transform="translate(${b.placed.i} ${b.placed.j})">${brikkeSvg(b.cells, COLORS[b.color], b.fixed)}</g>`;
+    h += `<g class="bp${b.fixed ? ' last' : ''}${valgt === b.id ? ' valgt' : ''}" data-p="${b.id}" transform="translate(${b.placed.i} ${b.placed.j})">${brikkeSvg(b.cells, COLORS[b.color], b.fixed, b.bars)}</g>`;
   }
   $('#lag-brikker').innerHTML = h;
   let hint = '';
@@ -237,7 +242,7 @@ function tegnTray() {
     el.setAttribute('class', 'brikke' + (valgt === b.id ? ' valgt' : ''));
     el.dataset.p = b.id;
     el._vb = [x, y]; el._u = trayU;
-    el.innerHTML = brikkeSvg(b.cells, COLORS[b.color]);
+    el.innerHTML = brikkeSvg(b.cells, COLORS[b.color], false, b.bars);
     trayEl.appendChild(el);
   }
 }
@@ -341,7 +346,7 @@ function bygSpøkelse() {
   el.setAttribute('width', (w * u).toFixed(1));
   el.setAttribute('height', (h * u).toFixed(1));
   el.setAttribute('class', 'spøkelse');
-  el.innerHTML = brikkeSvg(b.cells, COLORS[b.color]);
+  el.innerHTML = brikkeSvg(b.cells, COLORS[b.color], false, b.bars);
   document.body.appendChild(el);
   drag.ghost = el;
   drag.u = u;
@@ -369,7 +374,7 @@ function flyttTrekk(cx, cy) {
   for (const k of kand) {
     if (k.d > 1.7) break;
     const ai = k.i - drag.g[0], aj = k.j - drag.g[1];
-    if (passer(drag.b.cells, ai, aj, occ)) { snap = { i: ai, j: aj }; break; }
+    if (passer(drag.b.cells, drag.b.bars, ai, aj, occ)) { snap = { i: ai, j: aj }; break; }
   }
   const forrige = drag.snap;
   drag.snap = snap;
@@ -438,7 +443,7 @@ function roterPåBrett(b, pivot, occ, fn) {
   for (const k of kandidater) {
     const gammel = b.cells[k], ny = nye[k];
     const ai = b.placed.i + gammel[0] - ny[0], aj = b.placed.j + gammel[1] - ny[1];
-    if (passer(nye, ai, aj, occ)) { b.cells = nye; b.placed = { i: ai, j: aj }; lydDreie(); return true; }
+    if (passer(nye, b.bars, ai, aj, occ)) { b.cells = nye; b.placed = { i: ai, j: aj }; lydDreie(); return true; }
   }
   return false;
 }
@@ -491,10 +496,10 @@ $('#hint').onclick = () => {
 // ---- Ny løsning: legger alle brikkene, tilfeldig hver gang ----
 $('#losning').onclick = () => {
   const faste = brikker.filter(b => b.fixed);
-  const occ = new Uint8Array(HOLES.length);
-  for (const b of faste) for (const [di, dj] of b.cells) occ[INDEX[(b.placed.i + di) + ',' + (b.placed.j + dj)]] = 1;
+  const occ = new Uint8Array(Solver.TOTAL);
+  for (const b of faste) markér(occ, b);
   const igjen = brikker.filter(b => !b.fixed).map(b => b.id);
-  const r = Solver.solve(occ, igjen, { rnd: Math.random, limit: 1 });
+  const r = Solver.solveRandom(occ, igjen, Math.random);
   if (!r.first) { melding('Fant ingen løsning', 2400); return; }
   for (const b of brikker) if (!b.fixed) b.placed = null;
   for (const pl of r.first) {
