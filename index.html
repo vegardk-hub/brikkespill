@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="nb">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Brikkespill</title>
+<meta name="description" content="Legg alle ti brikkene på brettet, så bare ett hull står tomt.">
+<meta name="theme-color" content="#17161f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Brikkespill">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Brikkespill</h1>
+    <div id="status" aria-live="polite"></div>
+    <button id="lyd" class="ikon" aria-label="Lyd av/på" title="Lyd">🔊</button>
+    <button id="hjelp" class="ikon" aria-label="Slik spiller du" title="Slik spiller du">?</button>
+  </header>
+
+  <div id="nivaer" role="tablist" aria-label="Vanskelighetsgrad"></div>
+
+  <main>
+    <section id="venstre">
+      <svg id="brett" viewBox="-1.1 -1.1 14.2 7.2" aria-label="Spillebrett"></svg>
+      <div id="knapper">
+        <button id="roter">↻ Roter</button>
+        <button id="vend">⇋ Vend</button>
+        <button id="hint">💡 Hint</button>
+        <button id="nullstill">Nullstill</button>
+        <button id="ny" class="primaer">Ny oppgave</button>
+      </div>
+    </section>
+    <aside id="brikker" aria-label="Brikker"></aside>
+  </main>
+
+  <div id="melding" role="status"></div>
+</div>
+
+<div id="seier" hidden>
+  <canvas id="konfetti"></canvas>
+  <div class="boks">
+    <div class="stor">🎉</div>
+    <h2>Løst!</h2>
+    <p id="seierTekst"></p>
+    <button id="nesteOppgave" class="primaer">Neste oppgave</button>
+    <button id="lukkSeier">Se brettet</button>
+  </div>
+</div>
+
+<div id="regler" hidden>
+  <div class="boks">
+    <h2>Slik spiller du</h2>
+    <ul>
+      <li>Legg <b>alle ti brikkene</b> på brettet. Brettet har 39 hull, men brikkene har bare 38 kuler, så <b>ett hull blir tomt</b>.</li>
+      <li><b>Dra</b> en brikke fra siden og slipp den over hullene. Den fester seg når den passer.</li>
+      <li><b>Trykk</b> på en brikke for å rotere den. Med <b>Vend</b> snur du den om.</li>
+      <li>Brikker med en liten prikk er <b>låst</b> – de er hjelp fra oppgaven.</li>
+      <li>Står du fast? Trykk <b>Hint</b>. På PC: R = roter, F = vend.</li>
+    </ul>
+    <button id="lukkRegler" class="primaer">Sett i gang</button>
+  </div>
+</div>
+
+<script src="solver.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
