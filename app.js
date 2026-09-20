@@ -1,5 +1,5 @@
 'use strict';
-const VERSJON = 1;
+const VERSJON = 2;
 
 const { HOLES, INDEX, PIECES, COLS, ROWS } = Solver;
 const NS = 'http://www.w3.org/2000/svg';
@@ -85,6 +85,8 @@ let valgt = null;          // id
 let hintPl = null;
 let drag = null;
 let seierVist = false;
+let visteLøsning = false;   // en løsning fra appen teller ikke som løst oppgave
+let løsningTeller = 0;
 let lyd = lagret.lyd !== false;
 const puzzleCache = {};
 
@@ -115,7 +117,7 @@ function passer(cells, ai, aj, occ) {
 
 async function startOppgave(nyttNummer, gjenopprett) {
   nummer = nyttNummer;
-  hintPl = null; seierVist = false; $('#seier').hidden = true;
+  hintPl = null; seierVist = false; visteLøsning = false; $('#seier').hidden = true;
   brikker = nyBrikker();
   if (nivå.fast > 0) {
     const nøkkel = nivå.id + ':' + nummer;
@@ -486,9 +488,30 @@ $('#hint').onclick = () => {
   melding('Prøv denne brikken her', 3200);
 };
 
+// ---- Ny løsning: legger alle brikkene, tilfeldig hver gang ----
+$('#losning').onclick = () => {
+  const faste = brikker.filter(b => b.fixed);
+  const occ = new Uint8Array(HOLES.length);
+  for (const b of faste) for (const [di, dj] of b.cells) occ[INDEX[(b.placed.i + di) + ',' + (b.placed.j + dj)]] = 1;
+  const igjen = brikker.filter(b => !b.fixed).map(b => b.id);
+  const r = Solver.solve(occ, igjen, { rnd: Math.random, limit: 1 });
+  if (!r.first) { melding('Fant ingen løsning', 2400); return; }
+  for (const b of brikker) if (!b.fixed) b.placed = null;
+  for (const pl of r.first) {
+    const b = brikker[pl.piece];
+    b.cells = pl.rel.map(c => c.slice());
+    b.placed = { i: pl.anchor[0], j: pl.anchor[1] };
+  }
+  hintPl = null; valgt = null; visteLøsning = true; løsningTeller++;
+  lydKlikk();
+  tegnAlt(); lagreSpill();
+  const tom = HOLES.find((h, n) => !occupancy()[n]);
+  melding(`Løsning ${løsningTeller} – hullet som er tomt er i rad ${tom.j + 1}. Trykk igjen for en ny!`, 3600);
+};
+
 // ---- Seier ----
 function sjekkSeier() {
-  if (seierVist || brikker.some(b => !b.placed)) return;
+  if (seierVist || visteLøsning || brikker.some(b => !b.placed)) return;
   seierVist = true;
   lagret.løst = (lagret.løst || 0) + (nivå.fast ? 1 : 0);
   lagre();
@@ -536,7 +559,7 @@ $('#ny').onclick = () => {
   else { startOppgave(1, null); }
 };
 $('#nullstill').onclick = () => {
-  brikker = JSON.parse(startBrikker); valgt = null; hintPl = null; seierVist = false;
+  brikker = JSON.parse(startBrikker); valgt = null; hintPl = null; seierVist = false; visteLøsning = false;
   tegnAlt(); lagreSpill();
 };
 $('#nesteOppgave').onclick = () => { $('#seier').hidden = true; $('#ny').onclick(); };
