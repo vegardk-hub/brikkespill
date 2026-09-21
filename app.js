@@ -1,11 +1,11 @@
 'use strict';
-const VERSJON = 3;
+const VERSJON = 4;
 
-const { HOLES, INDEX, PIECES, COLS, ROWS } = Solver;
+const { HOLES, INDEX, PIECES } = Solver;
 const NS = 'http://www.w3.org/2000/svg';
 const $ = s => document.querySelector(s);
 
-// ---- Utseende (farger målt fra bildet, justert litt opp mot kamerats grå tone) ----
+// ---- Utseende (farger målt fra bildet, justert litt opp mot kameraets grå tone) ----
 const A = 0.66;                       // halv bredde på en kule (flate til flate), i hullenheter
 const C = A * (Math.SQRT2 - 1);
 const KI = 0.56;                      // indre åttekant, andel av ytre
@@ -33,68 +33,78 @@ function kule(color, x, y) {
   return h + '</g>';
 }
 
+// Brettet kan vises liggende (13 kolonner bortover) eller stående (transponert), alt etter skjermen.
+// (i, j) er alltid gitterkoordinater; xy() gir plassen på skjermen.
+let V = false;
+const xy = (i, j) => V ? [j, i] : [i, j];
+const latt = (x, y) => V ? [y, x] : [x, y];
+
 // Brikke: staver bare der brikken faktisk har dem (bars), fuger mellom diagonale naboer, så kulene.
 function brikkeSvg(cells, color, prikk, bars) {
-  const set = new Set(cells.map(c => c[0] + ',' + c[1]));
-  let under = '', kuler = '';
-  const barCol = mix(color, -0.12), barLite = mix(color, 0.18);
+  const P = cells.map(([i, j]) => xy(i, j));
   const len = 2 - 2 * A + 0.1;
+  const barCol = mix(color, -0.12), barLite = mix(color, 0.18);
+  let under = '', kuler = '';
   for (const [p, q] of bars) {
-    const [i0, j0] = cells[p], [i1, j1] = cells[q];
-    const i = Math.min(i0, i1), j = Math.min(j0, j1);
-    if (j0 === j1) {
-      under += `<rect x="${i + A - 0.05}" y="${j - 0.16}" width="${len}" height="0.32" fill="${barCol}"/>` +
-               `<rect x="${i + A - 0.05}" y="${j - 0.16}" width="${len}" height="0.08" fill="${barLite}"/>`;
+    const [x0, y0] = P[p], [x1, y1] = P[q];
+    const x = Math.min(x0, x1), y = Math.min(y0, y1);
+    if (y0 === y1) {
+      under += `<rect x="${x + A - 0.05}" y="${y - 0.16}" width="${len}" height="0.32" fill="${barCol}"/>` +
+               `<rect x="${x + A - 0.05}" y="${y - 0.16}" width="${len}" height="0.08" fill="${barLite}"/>`;
     } else {
-      under += `<rect x="${i - 0.16}" y="${j + A - 0.05}" width="0.32" height="${len}" fill="${barCol}"/>` +
-               `<rect x="${i - 0.16}" y="${j + A - 0.05}" width="0.08" height="${len}" fill="${barLite}"/>`;
+      under += `<rect x="${x - 0.16}" y="${y + A - 0.05}" width="0.32" height="${len}" fill="${barCol}"/>` +
+               `<rect x="${x - 0.16}" y="${y + A - 0.05}" width="0.08" height="${len}" fill="${barLite}"/>`;
     }
   }
-  for (const [i, j] of cells) {
-    for (const di of [1, -1]) {
-      if (set.has((i + di) + ',' + (j + 1))) {
-        under += `<line x1="${i}" y1="${j}" x2="${i + di}" y2="${j + 1}" stroke="${mix(color, -0.25)}" stroke-width="${(2 * C * A).toFixed(3)}"/>`;
-      }
+  for (let a = 0; a < P.length; a++) for (let b = a + 1; b < P.length; b++) {
+    if (Math.abs(P[a][0] - P[b][0]) === 1 && Math.abs(P[a][1] - P[b][1]) === 1) {
+      under += `<line x1="${P[a][0]}" y1="${P[a][1]}" x2="${P[b][0]}" y2="${P[b][1]}" stroke="${mix(color, -0.25)}" stroke-width="${(2 * C * A).toFixed(3)}"/>`;
     }
   }
-  for (const [i, j] of cells) kuler += kule(color, i, j);
-  let extra = '';
-  if (prikk) extra = `<circle cx="${cells[0][0]}" cy="${cells[0][1]}" r="0.13" fill="#fff" fill-opacity=".85"/>`;
+  for (const [x, y] of P) kuler += kule(color, x, y);
+  const extra = prikk ? `<circle cx="${P[0][0]}" cy="${P[0][1]}" r="0.13" fill="#fff" fill-opacity=".85"/>` : '';
   return under + kuler + extra;
 }
 
 function grenser(cells) {
-  const is = cells.map(c => c[0]), js = cells.map(c => c[1]);
-  return { i0: Math.min(...is), i1: Math.max(...is), j0: Math.min(...js), j1: Math.max(...js) };
+  const P = cells.map(([i, j]) => xy(i, j));
+  const xs = P.map(p => p[0]), ys = P.map(p => p[1]);
+  return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
 }
 
-// ---- Tilstand ----
+// Alle måter en brikke kan ligge på (dreid og speilet). Trykk går til neste.
+const ORI = PIECES.map(p => Solver.orientations(p.rel, p.bars));
+function nesteOri(b, cells) {
+  const lst = ORI[b.id], k = Solver.key(cells, b.bars);
+  const idx = lst.findIndex(o => Solver.key(o, b.bars) === k);
+  return lst[(idx + 1) % lst.length].map(c => c.slice());
+}
+
+// ---- Nivåer og lagring ----
 const NIVAER = [
-  { id: 'fri', navn: 'Fri lek', fast: 0 },
-  { id: 'lett', navn: 'Lett', fast: 6 },
-  { id: 'middels', navn: 'Middels', fast: 4 },
-  { id: 'vanskelig', navn: 'Vanskelig', fast: 3 },
-  { id: 'ekspert', navn: 'Ekspert', fast: 2 },
+  { id: 'fri', navn: 'Fri lek', fast: 0, tekst: 'Tomt brett. Bygg det selv.' },
+  { id: 'lett', navn: 'Lett', fast: 6, tekst: '6 brikker ligger klare' },
+  { id: 'middels', navn: 'Middels', fast: 4, tekst: '4 brikker ligger klare' },
+  { id: 'vanskelig', navn: 'Vanskelig', fast: 3, tekst: '3 brikker ligger klare' },
+  { id: 'ekspert', navn: 'Ekspert', fast: 2, tekst: 'Bare 2 brikker ligger klare' },
 ];
-const LAGRING = 'brikkespill.v1';
+const LAGRING = 'brikkespill.v2';
 let lagret = {};
 try { lagret = JSON.parse(localStorage.getItem(LAGRING) || '{}'); } catch (e) { lagret = {}; }
 function lagre() { try { localStorage.setItem(LAGRING, JSON.stringify(lagret)); } catch (e) { /* privat modus */ } }
+const lagretFor = id => (lagret.spill && lagret.spill[id]) || null;
 
-let nivå = NIVAER.find(n => n.id === lagret.nivå) || NIVAER[1];
+let nivå = NIVAER[1];
 let nummer = 1;
-let brikker = [];          // {id, color, cells (orientert), placed:{i,j}|null, fixed}
-let startBrikker = null;   // for Nullstill
-let valgt = null;          // id
-let hintPl = null;
+let brikker = [];          // {id, color, cells (orientert), bars, placed:{i,j}|null, fixed}
+let startBrikker = null;
+let valgt = null;
 let drag = null;
 let seierVist = false;
-let visteLøsning = false;   // en løsning fra appen teller ikke som løst oppgave
+let visteLøsning = false;  // en løsning fra appen teller ikke som løst oppgave
 let løsningTeller = 0;
 let lyd = lagret.lyd !== false;
 const puzzleCache = {};
-
-const nr = () => (lagret.nr && lagret.nr[nivå.id]) || 1;
 
 function nyBrikker() {
   return PIECES.map(p => ({ id: p.id, color: p.color, cells: p.rel.map(c => c.slice()), bars: p.bars, placed: null, fixed: false }));
@@ -106,9 +116,7 @@ function markér(occ, b) {
 }
 function occupancy(utenId) {
   const occ = new Uint8Array(Solver.TOTAL);
-  for (const br of brikker) {
-    if (br.placed && br.id !== utenId) markér(occ, br);
-  }
+  for (const br of brikker) if (br.placed && br.id !== utenId) markér(occ, br);
   return occ;
 }
 // Det brikken vil oppta om ankeret ligger i (ai, aj), eller null hvis den ikke passer:
@@ -122,7 +130,7 @@ function passer(cells, bars, ai, aj, occ) {
 
 async function startOppgave(nyttNummer, gjenopprett) {
   nummer = nyttNummer;
-  hintPl = null; seierVist = false; visteLøsning = false; $('#seier').hidden = true;
+  seierVist = false; visteLøsning = false; $('#seier').hidden = true;
   brikker = nyBrikker();
   if (nivå.fast > 0) {
     const nøkkel = nivå.id + ':' + nummer;
@@ -141,8 +149,8 @@ async function startOppgave(nyttNummer, gjenopprett) {
   }
   startBrikker = JSON.stringify(brikker);
   if (gjenopprett && gjenopprett.length) {
-    // legg tilbake det barnet hadde lagt, hvis det fortsatt er gyldig
-    const prøv = JSON.parse(JSON.stringify(brikker));
+    // legg tilbake det som var lagt, hvis det fortsatt er gyldig
+    const prøv = JSON.parse(startBrikker);
     const occ = new Uint8Array(Solver.TOTAL);
     prøv.forEach(b => { if (b.fixed) markér(occ, b); });
     let ok = true;
@@ -151,9 +159,9 @@ async function startOppgave(nyttNummer, gjenopprett) {
       if (!b || b.fixed || !Array.isArray(s.cells) || s.cells.length !== PIECES[s.id].cells.length) { ok = false; break; }
       b.cells = s.cells;
       if (s.placed) {
-        const hull = passer(b.cells, b.bars, s.placed.i, s.placed.j, occ);
-        if (!hull) { ok = false; break; }
-        hull.forEach(n => { occ[n] = 1; });
+        const fp = passer(b.cells, b.bars, s.placed.i, s.placed.j, occ);
+        if (!fp) { ok = false; break; }
+        fp.forEach(n => { occ[n] = 1; });
         b.placed = s.placed;
       }
     }
@@ -165,44 +173,50 @@ async function startOppgave(nyttNummer, gjenopprett) {
 }
 
 function lagreSpill() {
-  lagret.nivå = nivå.id;
-  lagret.nr = lagret.nr || {};
-  lagret.nr[nivå.id] = nummer;
-  lagret.brikker = brikker.filter(b => !b.fixed).map(b => ({ id: b.id, cells: b.cells, placed: b.placed }));
+  lagret.spill = lagret.spill || {};
+  const ferdig = seierVist || visteLøsning;
+  lagret.spill[nivå.id] = {
+    nr: seierVist ? nummer + 1 : nummer,
+    brikker: ferdig ? [] : brikker.filter(b => !b.fixed).map(b => ({ id: b.id, cells: b.cells, placed: b.placed })),
+  };
+  lagret.sist = nivå.id;
   lagret.lyd = lyd;
   lagre();
 }
 
-// ---- Tegning ----
+// ---- Brett og brikker ----
 const brett = $('#brett');
 const trayEl = $('#brikker');
+const flate = $('#flate');
 let trayU = 20;
 
-function byggBrett() {
-  let h = `<rect x="-1" y="-1" width="14" height="7" rx="0.6" fill="#efe6d2"/>` +
-          `<rect x="-0.92" y="-0.92" width="13.84" height="6.84" rx="0.55" fill="none" stroke="#d6c9ab" stroke-width="0.06"/>`;
-  for (const hl of HOLES) h += `<polygon points="${pts(1.26, hl.i, hl.j)}" fill="#e2d6bb"/>`;
-  for (const hl of HOLES) {
-    h += `<polygon points="${pts(1.04, hl.i, hl.j)}" fill="#cbbd9c"/>` +
-         `<polygon points="${pts(0.98, hl.i, hl.j)}" fill="#f3ebd9"/>` +
-         `<polygon points="${pts(0.62, hl.i + 0.03, hl.j + 0.05)}" fill="#e8dec7"/>`;
+function brettBunn() {
+  const w = V ? 7 : 14, h = V ? 14 : 7;
+  let s = `<rect x="-1" y="-1" width="${w}" height="${h}" rx="0.6" fill="#efe6d2"/>` +
+          `<rect x="-0.92" y="-0.92" width="${w - 0.16}" height="${h - 0.16}" rx="0.55" fill="none" stroke="#d6c9ab" stroke-width="0.06"/>`;
+  const P = HOLES.map(hl => xy(hl.i, hl.j));
+  for (const [x, y] of P) s += `<polygon points="${pts(1.26, x, y)}" fill="#e2d6bb"/>`;
+  for (const [x, y] of P) {
+    s += `<polygon points="${pts(1.04, x, y)}" fill="#cbbd9c"/>` +
+         `<polygon points="${pts(0.98, x, y)}" fill="#f3ebd9"/>` +
+         `<polygon points="${pts(0.62, x + 0.03, y + 0.05)}" fill="#e8dec7"/>`;
   }
-  h += '<g id="lag-brikker"></g><g id="lag-forhand"></g><g id="lag-hint"></g>';
-  brett.innerHTML = h;
+  return s;
+}
+
+function byggBrett() {
+  brett.setAttribute('viewBox', V ? '-1.1 -1.1 7.2 14.2' : '-1.1 -1.1 14.2 7.2');
+  brett.innerHTML = brettBunn() + '<g id="lag-brikker"></g><g id="lag-forhand"></g>';
 }
 
 function tegnBrett() {
   let h = '';
   for (const b of brikker) {
     if (!b.placed) continue;
-    h += `<g class="bp${b.fixed ? ' last' : ''}${valgt === b.id ? ' valgt' : ''}" data-p="${b.id}" transform="translate(${b.placed.i} ${b.placed.j})">${brikkeSvg(b.cells, COLORS[b.color], b.fixed, b.bars)}</g>`;
+    const [x, y] = xy(b.placed.i, b.placed.j);
+    h += `<g class="bp${b.fixed ? ' last' : ''}" data-p="${b.id}" transform="translate(${x} ${y})">${brikkeSvg(b.cells, COLORS[b.color], b.fixed, b.bars)}</g>`;
   }
   $('#lag-brikker').innerHTML = h;
-  let hint = '';
-  if (hintPl) {
-    hint = '<g class="hintform">' + hintPl.cells.map(n => `<polygon points="${pts(1, HOLES[n].i, HOLES[n].j)}"/>`).join('') + '</g>';
-  }
-  $('#lag-hint').innerHTML = hint;
 }
 
 function beregnSkala() {
@@ -210,36 +224,36 @@ function beregnSkala() {
   const cs = getComputedStyle(trayEl);
   const bredde = trayEl.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
   const høyde = trayEl.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
-  // størst mulig skala der alle brikkene som er igjen fortsatt får plass
-  let areal = 0, bred = 0;
-  for (const b of brikker) {
-    if (b.placed) continue;
-    const g = grenser(b.cells), m = A + 0.12;
-    const w = g.i1 - g.i0 + 2 * m, h = g.j1 - g.j0 + 2 * m;
-    areal += (w + 0.6) * (h + 0.4); bred = Math.max(bred, w, h);
+  let s;
+  if (flate.classList.contains('lay-P')) {
+    s = høyde / 5.5;                                   // største brikke er 5,3 enheter høy
+  } else {
+    let areal = 0;                                     // størst mulig skala der alle ti får plass
+    for (const b of brikker) {
+      const g = ORI[b.id][0];
+      const w = Math.max(...g.map(c => c[0])) - Math.min(...g.map(c => c[0])) + 2 * A;
+      const h = Math.max(...g.map(c => c[1])) - Math.min(...g.map(c => c[1])) + 2 * A;
+      areal += (Math.max(w, h) + 0.5) ** 2;
+    }
+    s = Math.min(Math.sqrt(Math.max(bredde, 1) * Math.max(høyde, 1) * 0.55 / areal), bredde / 5.5);
   }
-  let s = Math.sqrt(Math.max(bredde, 1) * Math.max(høyde, 1) * 0.62 / Math.max(areal, 1));
-  s = Math.min(s, bredde / Math.max(bred, 1), u * 1.5);
-  trayU = Math.max(13, Math.min(48, s));
+  trayU = Math.max(12, Math.min(48, s, u * 1.5));
 }
 
 function tegnTray() {
+  if (!brett.getScreenCTM()) return;
   beregnSkala();
   trayEl.innerHTML = '';
   const igjen = brikker.filter(b => !b.placed);
-  if (!igjen.length) {
-    trayEl.innerHTML = '<div class="tom">Alle brikkene er lagt ut 👍</div>';
-    return;
-  }
+  if (!igjen.length) { trayEl.innerHTML = '<div class="tom">Alle brikkene er lagt ut 👍</div>'; return; }
   for (const b of igjen) {
-    const g = grenser(b.cells);
-    const m = A + 0.12;
-    const x = g.i0 - m, y = g.j0 - m, w = g.i1 - g.i0 + 2 * m, hh = g.j1 - g.j0 + 2 * m;
+    const g = grenser(b.cells), m = A + 0.12;
+    const x = g.x0 - m, y = g.y0 - m, w = g.x1 - g.x0 + 2 * m, hh = g.y1 - g.y0 + 2 * m;
     const el = document.createElementNS(NS, 'svg');
     el.setAttribute('viewBox', `${x} ${y} ${w} ${hh}`);
     el.setAttribute('width', (w * trayU).toFixed(1));
     el.setAttribute('height', (hh * trayU).toFixed(1));
-    el.setAttribute('class', 'brikke' + (valgt === b.id ? ' valgt' : ''));
+    el.setAttribute('class', 'brikke');
     el.dataset.p = b.id;
     el._vb = [x, y]; el._u = trayU;
     el.innerHTML = brikkeSvg(b.cells, COLORS[b.color], false, b.bars);
@@ -249,15 +263,37 @@ function tegnTray() {
 
 function tegnStatus() {
   const lagt = brikker.filter(b => b.placed).length;
-  $('#status').textContent = (nivå.fast ? `Oppgave ${nummer}` : 'Fri lek') + ` · ${lagt}/10`;
-  const nivåEl = $('#nivaer');
-  nivåEl.querySelectorAll('button').forEach(k => k.setAttribute('aria-selected', String(k.dataset.id === nivå.id)));
-  $('#ny').textContent = nivå.fast ? 'Ny oppgave' : 'Tøm brettet';
+  $('#status').innerHTML = `<b>${nivå.navn}${nivå.fast ? ' · oppgave ' + nummer : ''}</b><span>${lagt} av 10 brikker på plass</span>`;
 }
 
 function tegnAlt() { tegnBrett(); tegnTray(); tegnStatus(); }
 
-// ---- Lyd ----
+// Velger best plassering av brett og brikker: liggende eller stående brett, brikkene til siden eller under.
+let layTid = 0;
+function oppdaterLayout() {
+  if ($('#spill').hidden) return;
+  const W = flate.clientWidth, H = flate.clientHeight;
+  if (!W || !H) return;
+  const gap = 10, kand = [];
+  const Tw = Math.max(200, Math.min(360, W * 0.3));
+  const Th = Math.max(110, Math.min(230, H * 0.24));
+  for (const v of [false, true]) {
+    const bw = v ? 7.2 : 14.2, bh = v ? 14.2 : 7.2;
+    kand.push({ lay: 'L', v, t: Tw, u: Math.min((W - Tw - gap) / bw, H / bh) });
+    kand.push({ lay: 'P', v, t: Th, u: Math.min(W / bw, (H - Th - gap) / bh) });
+  }
+  // liggende brett foretrekkes hvis det er nesten like stort som det stående, og brikkene til siden hvis det koster lite
+  kand.forEach(k => { k.score = k.u * (k.v ? 0.9 : 1) * (k.lay === 'L' ? 1.06 : 1); });
+  const best = kand.reduce((a, b) => (b.score > a.score ? b : a));
+  flate.className = 'lay-' + best.lay;
+  flate.style.setProperty('--t', best.t + 'px');
+  const skift = best.v !== V || !brett.firstChild;
+  V = best.v;
+  if (skift) { byggBrett(); tegnBrett(); }
+  tegnTray();
+}
+
+// ---- Lyd og meldinger ----
 let ctx = null;
 function tone(f, start, dur, type = 'sine', vol = 0.12) {
   if (!lyd) return;
@@ -284,6 +320,16 @@ function melding(tekst, ms = 2600) {
   meldingTid = setTimeout(() => el.classList.remove('vis'), ms);
 }
 
+function bekreft(tekst) {
+  return new Promise(res => {
+    $('#dialogTekst').textContent = tekst;
+    $('#dialog').hidden = false;
+    const ferdig = v => { $('#dialog').hidden = true; res(v); };
+    $('#dialogJa').onclick = () => ferdig(true);
+    $('#dialogNei').onclick = () => ferdig(false);
+  });
+}
+
 // ---- Dra og slipp ----
 function skjermTilBrett(x, y) {
   const m = brett.getScreenCTM();
@@ -291,31 +337,30 @@ function skjermTilBrett(x, y) {
   return { x: p.x, y: p.y, u: m.a };
 }
 
-function nærmesteCelle(b, px, py) {
+// Nærmeste kule i brikken til et punkt (skjermkoordinater relativt til ankeret)
+function nærmesteIdx(b, dx, dy) {
   let best = 0, bd = Infinity;
-  b.cells.forEach(([i, j], k) => { const d = (i - px) ** 2 + (j - py) ** 2; if (d < bd) { bd = d; best = k; } });
-  return b.cells[best].slice();
+  b.cells.forEach(([i, j], k) => { const [x, y] = xy(i, j); const d = (x - dx) ** 2 + (y - dy) ** 2; if (d < bd) { bd = d; best = k; } });
+  return best;
 }
 
 document.addEventListener('pointerdown', e => {
   const el = e.target.closest && e.target.closest('[data-p]');
   if (!el || drag || e.button > 0) return;
   const b = brikker[+el.dataset.p];
-  e.preventDefault();
+  if (e.pointerType === 'mouse') e.preventDefault();
   if (b.fixed) { el.classList.remove('rist'); void el.getBoundingClientRect(); el.classList.add('rist'); melding('Den brikken er låst – den hører til oppgaven'); return; }
   valgt = b.id;
-  let g;
+  let gk;
   if (b.placed) {
-    const p = skjermTilBrett(e.clientX, e.clientY);
-    g = nærmesteCelle(b, p.x - b.placed.i, p.y - b.placed.j);
+    const p = skjermTilBrett(e.clientX, e.clientY), [ax, ay] = xy(b.placed.i, b.placed.j);
+    gk = nærmesteIdx(b, p.x - ax, p.y - ay);
   } else {
     const r = el.getBoundingClientRect();
-    g = nærmesteCelle(b, el._vb[0] + (e.clientX - r.left) / el._u, el._vb[1] + (e.clientY - r.top) / el._u);
+    gk = nærmesteIdx(b, el._vb[0] + (e.clientX - r.left) / el._u, el._vb[1] + (e.clientY - r.top) / el._u);
   }
-  drag = { b, el, g, id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: performance.now(), flyttet: false,
-           fraBrett: !!b.placed, ankerFør: b.placed, cellerFør: b.cells, snap: null, ghost: null,
+  drag = { b, el, gk, id: e.pointerId, x0: e.clientX, y0: e.clientY, flyttet: false, snap: null, ghost: null,
            lift: e.pointerType === 'touch' ? 1.5 : 0 };
-  hintPl = null;
 });
 
 window.addEventListener('pointermove', e => {
@@ -329,8 +374,7 @@ window.addEventListener('pointermove', e => {
 
 function startTrekk() {
   drag.flyttet = true;
-  const b = drag.b;
-  if (b.placed) { b.placed = null; }
+  if (drag.b.placed) drag.b.placed = null;
   drag.el.style.visibility = 'hidden';
   tegnStatus();
   bygSpøkelse();
@@ -340,7 +384,7 @@ function bygSpøkelse() {
   if (drag.ghost) drag.ghost.remove();
   const b = drag.b, u = skjermTilBrett(0, 0).u;
   const g = grenser(b.cells), m = A + 0.12;
-  const x = g.i0 - m, y = g.j0 - m, w = g.i1 - g.i0 + 2 * m, h = g.j1 - g.j0 + 2 * m;
+  const x = g.x0 - m, y = g.y0 - m, w = g.x1 - g.x0 + 2 * m, h = g.y1 - g.y0 + 2 * m;
   const el = document.createElementNS(NS, 'svg');
   el.setAttribute('viewBox', `${x} ${y} ${w} ${h}`);
   el.setAttribute('width', (w * u).toFixed(1));
@@ -350,8 +394,8 @@ function bygSpøkelse() {
   document.body.appendChild(el);
   drag.ghost = el;
   drag.u = u;
-  // hvor i spøkelset den grepne cellen ligger, i px
-  drag.gx = (drag.g[0] - x) * u; drag.gy = (drag.g[1] - y) * u;
+  const [gx, gy] = xy(...b.cells[drag.gk]);
+  drag.gx = (gx - x) * u; drag.gy = (gy - y) * u;
   if (drag.px !== undefined) flyttTrekk(drag.px, drag.py);
 }
 
@@ -359,21 +403,23 @@ function flyttTrekk(cx, cy) {
   drag.px = cx; drag.py = cy;
   const ty = cy - drag.lift * drag.u;
   drag.ghost.style.transform = `translate(${(cx - drag.gx).toFixed(1)}px, ${(ty - drag.gy).toFixed(1)}px)`;
-  // finn nærmeste gyldige feste
+  // nærmeste gyldige feste, regnet i gitterkoordinater
   const p = skjermTilBrett(cx, ty);
+  const [pi, pj] = latt(p.x, p.y);
+  const g = drag.b.cells[drag.gk];
   const occ = occupancy(drag.b.id);
   const kand = [];
-  for (let j = Math.floor(p.y) - 1; j <= Math.ceil(p.y) + 1; j++) {
-    for (let i = Math.floor(p.x) - 1; i <= Math.ceil(p.x) + 1; i++) {
+  for (let j = Math.floor(pj) - 1; j <= Math.ceil(pj) + 1; j++) {
+    for (let i = Math.floor(pi) - 1; i <= Math.ceil(pi) + 1; i++) {
       if (INDEX[i + ',' + j] === undefined) continue;
-      kand.push({ i, j, d: Math.hypot(i - p.x, j - p.y) });
+      kand.push({ i, j, d: Math.hypot(i - pi, j - pj) });
     }
   }
   kand.sort((a, b) => a.d - b.d);
   let snap = null;
   for (const k of kand) {
     if (k.d > 1.7) break;
-    const ai = k.i - drag.g[0], aj = k.j - drag.g[1];
+    const ai = k.i - g[0], aj = k.j - g[1];
     if (passer(drag.b.cells, drag.b.bars, ai, aj, occ)) { snap = { i: ai, j: aj }; break; }
   }
   const forrige = drag.snap;
@@ -385,8 +431,9 @@ function tegnForhåndsvisning() {
   const lag = $('#lag-forhand');
   if (!drag || !drag.snap) { lag.innerHTML = ''; return; }
   const b = drag.b, s = drag.snap;
-  lag.innerHTML = `<g transform="translate(${s.i} ${s.j})" opacity=".55">` +
-    b.cells.map(([i, j]) => `<polygon points="${pts(1.08, i, j)}" fill="#fff" stroke="${COLORS[b.color]}" stroke-width=".1"/>`).join('') + '</g>';
+  const [ox, oy] = xy(s.i, s.j);
+  lag.innerHTML = `<g transform="translate(${ox} ${oy})" opacity=".55">` +
+    b.cells.map(([i, j]) => { const [x, y] = xy(i, j); return `<polygon points="${pts(1.08, x, y)}" fill="#fff" stroke="${COLORS[b.color]}" stroke-width=".1"/>`; }).join('') + '</g>';
 }
 
 window.addEventListener('pointerup', e => { if (drag && e.pointerId === drag.id) slipp(true); });
@@ -398,27 +445,41 @@ function slipp(ok) {
   if (d.ghost) d.ghost.remove();
   const b = d.b;
   if (!d.flyttet) {
-    // et trykk: roter
-    if (ok) trykk(b, d);
+    if (ok) trykk(b, d);       // et trykk snur brikken
     return;
   }
-  if (ok && d.snap) {
-    b.placed = d.snap;
-    lydKlikk();
-  } else {
-    b.placed = null;   // tilbake i brettet ved siden av
-  }
+  if (ok && d.snap) { b.placed = d.snap; lydKlikk(); }
+  else b.placed = null;         // tilbake til brikkene ved siden av
   tegnAlt(); lagreSpill();
   sjekkSeier();
 }
 
-// Trykk på en brikke roterer den (på brettet: rundt cellen som ble trykket, hvis det er plass)
+// Snu en brikke til neste orientering. På brettet holdes cellen du trykket på (eller en annen) på plass,
+// og det prøves videre til en orientering som får plass.
+function snuPåBrett(b, pivotIdx) {
+  const occ = occupancy(b.id);
+  const mi = b.cells.reduce((s, c) => s + c[0], 0) / b.cells.length, mj = b.cells.reduce((s, c) => s + c[1], 0) / b.cells.length;
+  const rekke = b.cells.map((c, k) => k).sort((a, c) => {
+    if (a === pivotIdx) return -1; if (c === pivotIdx) return 1;
+    return Math.hypot(b.cells[a][0] - mi, b.cells[a][1] - mj) - Math.hypot(b.cells[c][0] - mi, b.cells[c][1] - mj);
+  });
+  let cur = b.cells;
+  for (let steg = 0; steg < ORI[b.id].length; steg++) {
+    cur = nesteOri(b, cur);
+    for (const k of rekke) {
+      const ai = b.placed.i + b.cells[k][0] - cur[k][0], aj = b.placed.j + b.cells[k][1] - cur[k][1];
+      if (passer(cur, b.bars, ai, aj, occ)) { b.cells = cur; b.placed = { i: ai, j: aj }; return true; }
+    }
+  }
+  return false;
+}
+
 function trykk(b, d) {
   if (b.placed) {
-    const occ = occupancy(b.id);
-    if (!roterPåBrett(b, d.g, occ, c => Solver.rotate(c))) { rist(b); melding('Det er ikke plass til å rotere her'); }
+    if (snuPåBrett(b, d.gk)) lydDreie();
+    else { rist(b); melding('Det er ikke plass til å snu den her'); }
   } else {
-    b.cells = Solver.rotate(b.cells);
+    b.cells = nesteOri(b, b.cells);
     lydDreie();
   }
   tegnAlt(); lagreSpill();
@@ -429,75 +490,28 @@ function rist(b) {
   if (el) { el.classList.remove('rist'); void el.getBBox(); el.classList.add('rist'); }
 }
 
-// Transformer en brikke som ligger på brettet. Prøver først den oppgitte cellen som dreiepunkt,
-// deretter de andre cellene (de nærmeste midten først).
-function roterPåBrett(b, pivot, occ, fn) {
-  const nye = fn(b.cells);
-  const gammelIdx = b.cells.findIndex(c => c[0] === pivot[0] && c[1] === pivot[1]);
-  const kandidater = b.cells.map((c, k) => k);
-  const mi = b.cells.reduce((s, c) => s + c[0], 0) / b.cells.length, mj = b.cells.reduce((s, c) => s + c[1], 0) / b.cells.length;
-  kandidater.sort((a, c) => {
-    if (a === gammelIdx) return -1; if (c === gammelIdx) return 1;
-    return Math.hypot(b.cells[a][0] - mi, b.cells[a][1] - mj) - Math.hypot(b.cells[c][0] - mi, b.cells[c][1] - mj);
-  });
-  for (const k of kandidater) {
-    const gammel = b.cells[k], ny = nye[k];
-    const ai = b.placed.i + gammel[0] - ny[0], aj = b.placed.j + gammel[1] - ny[1];
-    if (passer(nye, b.bars, ai, aj, occ)) { b.cells = nye; b.placed = { i: ai, j: aj }; lydDreie(); return true; }
-  }
-  return false;
-}
-
-function transformer(fn, drei) {
+// PC: R snur brikken du drar (eller den sist valgte), høyreklikk og musehjul likså
+function snuValgt() {
   if (drag && drag.flyttet) {
-    drag.b.cells = fn(drag.b.cells);
-    drag.g = fn([drag.g])[0];
+    drag.b.cells = nesteOri(drag.b, drag.b.cells);
     drag.snap = null;
     bygSpøkelse(); lydDreie();
     return;
   }
   const b = brikker.find(x => x.id === valgt);
-  if (!b) { melding('Trykk på en brikke først'); return; }
-  if (b.fixed) { melding('Den brikken er låst'); return; }
-  if (b.placed) {
-    if (!roterPåBrett(b, b.cells[0], occupancy(b.id), fn)) { rist(b); melding('Det er ikke plass her – flytt brikken først'); return; }
-  } else { b.cells = fn(b.cells); lydDreie(); }
-  hintPl = null;
-  tegnAlt(); lagreSpill();
+  if (!b || b.fixed || $('#spill').hidden) return;
+  if (b.placed) { if (!snuPåBrett(b, 0)) { rist(b); return; } }
+  else b.cells = nesteOri(b, b.cells);
+  lydDreie(); tegnAlt(); lagreSpill();
 }
-
-$('#roter').onclick = () => transformer(Solver.rotate);
-$('#vend').onclick = () => transformer(Solver.mirror);
-window.addEventListener('keydown', e => {
-  if (e.key === 'r' || e.key === 'R') transformer(Solver.rotate);
-  else if (e.key === 'f' || e.key === 'F') transformer(Solver.mirror);
-});
-window.addEventListener('contextmenu', e => { if (drag) { e.preventDefault(); transformer(Solver.rotate); } });
-window.addEventListener('wheel', e => { if (drag && drag.flyttet) { transformer(Solver.rotate); } }, { passive: true });
-
-// ---- Hint ----
-$('#hint').onclick = () => {
-  const igjen = brikker.filter(b => !b.placed).map(b => b.id);
-  if (!igjen.length) { melding('Alle brikkene er lagt ut'); return; }
-  const r = Solver.solve(occupancy(), igjen, { limit: 1 });
-  if (!r.first) {
-    melding(r.gaveUp ? 'Jeg klarte ikke å regne det ut – prøv å ta bort en brikke' : 'Med disse brikkene går det ikke opp – ta bort en av dem som ikke er låst', 3800);
-    return;
-  }
-  // vis brikken som har færrest muligheter først: den største
-  const pl = r.first.slice().sort((a, b) => PIECES[b.piece].cells.length - PIECES[a.piece].cells.length)[0];
-  hintPl = pl;
-  tegnBrett();
-  const trekk = trayEl.querySelector(`[data-p="${pl.piece}"]`);
-  if (trekk) { trekk.classList.remove('hintblink'); void trekk.getBoundingClientRect(); trekk.classList.add('hintblink'); }
-  melding('Prøv denne brikken her', 3200);
-};
+window.addEventListener('keydown', e => { if (e.key === 'r' || e.key === 'R') snuValgt(); });
+window.addEventListener('contextmenu', e => { if (drag) { e.preventDefault(); snuValgt(); } });
+window.addEventListener('wheel', e => { if (drag && drag.flyttet) snuValgt(); }, { passive: true });
 
 // ---- Ny løsning: legger alle brikkene, tilfeldig hver gang ----
 $('#losning').onclick = () => {
-  const faste = brikker.filter(b => b.fixed);
   const occ = new Uint8Array(Solver.TOTAL);
-  for (const b of faste) markér(occ, b);
+  for (const b of brikker) if (b.fixed) markér(occ, b);
   const igjen = brikker.filter(b => !b.fixed).map(b => b.id);
   const r = Solver.solveRandom(occ, igjen, Math.random);
   if (!r.first) { melding('Fant ingen løsning', 2400); return; }
@@ -507,24 +521,24 @@ $('#losning').onclick = () => {
     b.cells = pl.rel.map(c => c.slice());
     b.placed = { i: pl.anchor[0], j: pl.anchor[1] };
   }
-  hintPl = null; valgt = null; visteLøsning = true; løsningTeller++;
+  valgt = null; visteLøsning = true; løsningTeller++;
   lydKlikk();
   tegnAlt(); lagreSpill();
   const tom = HOLES.find((h, n) => !occupancy()[n]);
-  melding(`Løsning ${løsningTeller} – hullet som er tomt er i rad ${tom.j + 1}. Trykk igjen for en ny!`, 3600);
+  melding(`Løsning ${løsningTeller} – trykk ✨ igjen for en ny. Tomt hull: rad ${tom.j + 1}.`, 3600);
 };
 
 // ---- Seier ----
 function sjekkSeier() {
   if (seierVist || visteLøsning || brikker.some(b => !b.placed)) return;
   seierVist = true;
-  lagret.løst = (lagret.løst || 0) + (nivå.fast ? 1 : 0);
-  lagre();
+  if (nivå.fast) lagret.løst = (lagret.løst || 0) + 1;
+  lagreSpill();
   tegnStatus();
-  const tomt = HOLES.filter((h, n) => !occupancy()[n])[0];
   $('#seierTekst').textContent = nivå.fast
-    ? `Alle ti brikkene ligger på plass. Du har løst ${lagret.løst} oppgave${lagret.løst === 1 ? '' : 'r'}. Hullet som ble stående tomt er i rad ${tomt.j + 1}, hull ${Math.floor(tomt.i / 2) + 1} fra venstre.`
+    ? `Alle ti brikkene ligger på plass. Du har løst ${lagret.løst} oppgave${lagret.løst === 1 ? '' : 'r'}.`
     : 'Alle ti brikkene ligger på plass!';
+  $('#nesteOppgave').textContent = nivå.fast ? 'Neste oppgave' : 'Nytt brett';
   setTimeout(() => { $('#seier').hidden = false; lydSeier(); konfetti(); }, 350);
 }
 
@@ -547,40 +561,91 @@ function konfetti() {
   })();
 }
 
-// ---- Knapper ----
-function byggNivåer() {
-  const el = $('#nivaer');
-  el.innerHTML = '';
-  for (const n of NIVAER) {
-    const k = document.createElement('button');
-    k.textContent = n.navn; k.dataset.id = n.id; k.setAttribute('role', 'tab');
-    k.onclick = () => { if (n.id === nivå.id) return; nivå = n; startOppgave(nr(), null); };
-    el.appendChild(k);
-  }
+// ---- Nytt spill ----
+async function nyttSpill() {
+  const egne = brikker.filter(b => b.placed && !b.fixed).length;
+  if (egne >= 2 && !seierVist && !visteLøsning && !(await bekreft('Vil du starte et nytt spill? Det du har lagt nå går tapt.'))) return;
+  await startOppgave(nivå.fast ? nummer + 1 : 1, null);
+}
+$('#ny').onclick = nyttSpill;
+$('#nesteOppgave').onclick = () => { $('#seier').hidden = true; startOppgave(nivå.fast ? nummer + 1 : 1, null); };
+$('#lukkSeier').onclick = () => { $('#seier').hidden = true; };
+$('#seierHjem').onclick = () => { $('#seier').hidden = true; tilbake(); };
+
+// ---- Startside ----
+function miniIkon(fast) {
+  let s = '';
+  PIECES.forEach((p, k) => {
+    const x = (k % 5) * 1.5 + 0.7, y = Math.floor(k / 5) * 1.5 + 0.7;
+    s += k < fast ? kule(COLORS[p.color], x, y)
+                  : `<polygon points="${pts(1, x, y)}" fill="#2c2940" stroke="#4a4463" stroke-width=".08"/>`;
+  });
+  return `<svg viewBox="0 0 7.5 3.1" aria-hidden="true">${s}</svg>`;
 }
 
-$('#ny').onclick = () => {
-  if (nivå.fast) { lagret.nr = lagret.nr || {}; lagret.nr[nivå.id] = nummer + 1; startOppgave(nummer + 1, null); }
-  else { startOppgave(1, null); }
-};
-$('#nullstill').onclick = () => {
-  brikker = JSON.parse(startBrikker); valgt = null; hintPl = null; seierVist = false; visteLøsning = false;
-  tegnAlt(); lagreSpill();
-};
-$('#nesteOppgave').onclick = () => { $('#seier').hidden = true; $('#ny').onclick(); };
-$('#lukkSeier').onclick = () => { $('#seier').hidden = true; };
+function logoSvg() {
+  const gammel = V; V = false;
+  let s = brettBunn();
+  for (const p of PIECES) s += `<g transform="translate(${p.cells[0][0]} ${p.cells[0][1]})">${brikkeSvg(p.rel, COLORS[p.color], false, p.bars)}</g>`;
+  V = gammel;
+  return `<svg viewBox="-1.1 -1.1 14.2 7.2">${s}</svg>`;
+}
+
+function tegnHjem() {
+  $('#logo').innerHTML = logoSvg();
+  const kort = $('#kort');
+  kort.innerHTML = '';
+  for (const n of NIVAER) {
+    const lag = lagretFor(n.id);
+    const k = document.createElement('button');
+    k.setAttribute('role', 'listitem');
+    const nr = lag && lag.nr > 1 && n.fast ? ` · oppgave ${lag.nr}` : '';
+    k.innerHTML = miniIkon(n.fast) + `<span><span class="navn">${n.navn}</span><br><span class="sub">${n.tekst}${nr}</span></span>`;
+    k.onclick = () => start(n);
+    kort.appendChild(k);
+  }
+  const sist = NIVAER.find(n => n.id === lagret.sist), lagSist = sist && lagretFor(sist.id);
+  const fortsett = $('#fortsett');
+  if (sist && lagSist && lagSist.brikker && lagSist.brikker.some(b => b.placed)) {
+    fortsett.hidden = false;
+    fortsett.textContent = `Fortsett: ${sist.navn}${sist.fast ? ', oppgave ' + lagSist.nr : ''}`;
+    fortsett.onclick = () => start(sist);
+  } else fortsett.hidden = true;
+  $('#loststat').textContent = lagret.løst ? `Løst: ${lagret.løst}` : '';
+  $('#lyd').textContent = lyd ? '🔊' : '🔇';
+}
+
+async function start(n) {
+  nivå = n;
+  const lag = lagretFor(n.id);
+  $('#hjem').hidden = true; $('#spill').hidden = false;
+  history.pushState({ spill: 1 }, '');
+  oppdaterLayout();
+  await startOppgave(lag ? lag.nr : 1, lag ? lag.brikker : null);
+  oppdaterLayout();
+}
+
+function tilbake() {
+  if (history.state && history.state.spill) history.back();
+  else visHjem();
+}
+function visHjem() {
+  if (drag) { if (drag.ghost) drag.ghost.remove(); drag = null; }
+  $('#spill').hidden = true; $('#seier').hidden = true; $('#hjem').hidden = false;
+  tegnHjem();
+}
+window.addEventListener('popstate', visHjem);
+$('#tilbake').onclick = tilbake;
+
 $('#hjelp').onclick = () => { $('#regler').hidden = false; };
 $('#lukkRegler').onclick = () => { $('#regler').hidden = true; lagret.sett = true; lagre(); };
-$('#lyd').onclick = () => { lyd = !lyd; $('#lyd').textContent = lyd ? '🔊' : '🔇'; lagreSpill(); if (lyd) lydKlikk(); };
+$('#lyd').onclick = () => { lyd = !lyd; $('#lyd').textContent = lyd ? '🔊' : '🔇'; lagre(); if (lyd) lydKlikk(); };
 
-let resizeTid = 0;
-new ResizeObserver(() => { clearTimeout(resizeTid); resizeTid = setTimeout(() => { if (!drag) tegnTray(); }, 80); }).observe(trayEl);
+new ResizeObserver(() => { clearTimeout(layTid); layTid = setTimeout(() => { if (!drag) oppdaterLayout(); }, 60); }).observe(flate);
 
 // ---- Start ----
-byggBrett();
-byggNivåer();
-$('#lyd').textContent = lyd ? '🔊' : '🔇';
-startOppgave(nr(), lagret.brikker).then(() => { if (!lagret.sett) $('#regler').hidden = false; });
+tegnHjem();
+if (!lagret.sett) $('#regler').hidden = false;
 
 // ---- Service worker: hent ny versjon og last siden på nytt når den tar over ----
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {

@@ -16,35 +16,40 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<div id="app">
-  <header>
+
+<!-- Startside -->
+<section id="hjem">
+  <div class="hjem-inn">
+    <div id="logo" aria-hidden="true"></div>
     <h1>Brikkespill</h1>
+    <p class="under">Legg alle ti brikkene på brettet. Ett hull blir tomt.</p>
+    <button id="fortsett" class="fortsett" hidden></button>
+    <div id="kort" class="kort" role="list"></div>
+    <div class="bunn">
+      <button id="hjelp" class="lenke">Slik spiller du</button>
+      <span id="loststat" class="dempet"></span>
+      <button id="lyd" class="lenke" aria-label="Lyd av/på">🔊</button>
+    </div>
+  </div>
+</section>
+
+<!-- Spillet -->
+<section id="spill" hidden>
+  <div id="topp">
+    <button id="tilbake" class="ikon" aria-label="Til startsiden">←</button>
     <div id="status" aria-live="polite"></div>
-    <button id="lyd" class="ikon" aria-label="Lyd av/på" title="Lyd">🔊</button>
-    <button id="hjelp" class="ikon" aria-label="Slik spiller du" title="Slik spiller du">?</button>
-  </header>
-
-  <div id="nivaer" role="tablist" aria-label="Vanskelighetsgrad"></div>
-
-  <main>
-    <section id="venstre">
-      <svg id="brett" viewBox="-1.1 -1.1 14.2 7.2" aria-label="Spillebrett"></svg>
-      <div id="knapper">
-        <button id="roter">↻ Roter</button>
-        <button id="vend">⇋ Vend</button>
-        <button id="hint">💡 Hint</button>
-        <button id="losning">✨ Vis løsning</button>
-        <button id="nullstill">Nullstill</button>
-        <button id="ny" class="primaer">Ny oppgave</button>
-      </div>
-    </section>
+    <button id="losning" class="ikon" aria-label="Vis en løsning" title="Vis en løsning">✨</button>
+    <button id="ny" class="pille">Nytt spill</button>
+  </div>
+  <div id="flate">
+    <svg id="brett" viewBox="-1.1 -1.1 14.2 7.2" aria-label="Spillebrett"></svg>
     <aside id="brikker" aria-label="Brikker"></aside>
-  </main>
+  </div>
+</section>
 
-  <div id="melding" role="status"></div>
-</div>
+<div id="melding" role="status"></div>
 
-<div id="seier" hidden>
+<div id="seier" class="dekk" hidden>
   <canvas id="konfetti"></canvas>
   <div class="boks">
     <div class="stor">🎉</div>
@@ -52,20 +57,30 @@
     <p id="seierTekst"></p>
     <button id="nesteOppgave" class="primaer">Neste oppgave</button>
     <button id="lukkSeier">Se brettet</button>
+    <button id="seierHjem">Startsiden</button>
   </div>
 </div>
 
-<div id="regler" hidden>
+<div id="regler" class="dekk" hidden>
   <div class="boks">
     <h2>Slik spiller du</h2>
     <ul>
       <li>Legg <b>alle ti brikkene</b> på brettet. Brettet har 39 hull, men brikkene har bare 38 kuler, så <b>ett hull blir tomt</b>.</li>
-      <li><b>Dra</b> en brikke fra siden og slipp den over hullene. Den fester seg når den passer.</li>
-      <li><b>Trykk</b> på en brikke for å rotere den. Med <b>Vend</b> snur du den om.</li>
+      <li><b>Dra</b> en brikke og slipp den over hullene. Den fester seg når den passer.</li>
+      <li><b>Trykk</b> på en brikke for å snu den. Den går gjennom alle måter den kan ligge på.</li>
+      <li>Brikkene kan ikke ligge oppå eller krysse hverandre.</li>
       <li>Brikker med en liten prikk er <b>låst</b> – de er hjelp fra oppgaven.</li>
-      <li>Står du fast? Trykk <b>Hint</b>, eller <b>Vis løsning</b> for å se en ferdig løsning (ny hver gang i Fri lek). På PC: R = roter, F = vend.</li>
+      <li>Står du fast? Trykk ✨ for å se en løsning. På PC: R snur brikken du drar.</li>
     </ul>
     <button id="lukkRegler" class="primaer">Sett i gang</button>
+  </div>
+</div>
+
+<div id="dialog" class="dekk" hidden>
+  <div class="boks">
+    <p id="dialogTekst"></p>
+    <button id="dialogJa" class="primaer">Ja</button>
+    <button id="dialogNei">Avbryt</button>
   </div>
 </div>
 
