@@ -1,5 +1,5 @@
 // Bump CACHE og VERSJON i app.js sammen ved hver endring.
-const CACHE = 'brikkespill-v4';
+const CACHE = 'brikkespill-v5';
 const FILER = ['./', 'index.html', 'styles.css', 'solver.js', 'app.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 

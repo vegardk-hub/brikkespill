@@ -1,5 +1,5 @@
 'use strict';
-const VERSJON = 4;
+const VERSJON = 5;
 
 const { HOLES, INDEX, PIECES } = Solver;
 const NS = 'http://www.w3.org/2000/svg';
@@ -287,6 +287,9 @@ function oppdaterLayout() {
   const best = kand.reduce((a, b) => (b.score > a.score ? b : a));
   flate.className = 'lay-' + best.lay;
   flate.style.setProperty('--t', best.t + 'px');
+  // eksplisitt størrelse på brettet (avrundet ned), så resten av plassen alltid går til brikkene
+  brett.style.width = Math.floor((best.v ? 7.2 : 14.2) * best.u) + 'px';
+  brett.style.height = Math.floor((best.v ? 14.2 : 7.2) * best.u) + 'px';
   const skift = best.v !== V || !brett.firstChild;
   V = best.v;
   if (skift) { byggBrett(); tegnBrett(); }
@@ -641,7 +644,12 @@ $('#hjelp').onclick = () => { $('#regler').hidden = false; };
 $('#lukkRegler').onclick = () => { $('#regler').hidden = true; lagret.sett = true; lagre(); };
 $('#lyd').onclick = () => { lyd = !lyd; $('#lyd').textContent = lyd ? '🔊' : '🔇'; lagre(); if (lyd) lydKlikk(); };
 
-new ResizeObserver(() => { clearTimeout(layTid); layTid = setTimeout(() => { if (!drag) oppdaterLayout(); }, 60); }).observe(flate);
+const planLayout = () => { clearTimeout(layTid); layTid = setTimeout(() => { if (!drag) oppdaterLayout(); }, 60); };
+new ResizeObserver(planLayout).observe(flate);
+// reserve: noen mobilnettlesere melder ikke alltid størrelsesendring (adresselinje, dreiing av skjermen)
+window.addEventListener('resize', planLayout);
+window.addEventListener('orientationchange', () => setTimeout(planLayout, 250));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', planLayout);
 
 // ---- Start ----
 tegnHjem();
